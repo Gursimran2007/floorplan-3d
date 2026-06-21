@@ -196,6 +196,18 @@ $('demoBtn').onclick = async ()=>{
   const r = await fetch('/api/demo'); const dataURL = (await r.json()).image;
   sendImage(dataURL);
 };
+
+// ?model=cubicasa -> load a precomputed model from the pretrained detector
+if(new URLSearchParams(location.search).get('model')==='cubicasa'){
+  (async ()=>{
+    setStatus('loading CubiCasa model…','var(--accent)');
+    const r = await fetch('/api/cubicasa');
+    if(!r.ok){ setStatus('no precomputed model','#f85149'); return; }
+    const m = await r.json();
+    renderModel(m); showStats(m);
+    setStatus(`CubiCasa model — ${m.boxes.length} boxes built.`,'var(--ok)');
+  })();
+}
 </script>
 </body>
 </html>
