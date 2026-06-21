@@ -6,3 +6,7 @@ data/
 *.model.json
 demo.png
 demo.json
+
+# local model demo artifacts
+static/_cubicasa_model.json
+cubicasa_overlay.png

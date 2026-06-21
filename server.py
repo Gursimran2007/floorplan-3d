@@ -86,12 +86,21 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        path = self.path.split("?", 1)[0]
+        if path in ("/", "/index.html"):
             with open(os.path.join(STATIC, "index.html"), "rb") as f:
                 self._send(200, f.read(), "text/html; charset=utf-8")
-        elif self.path == "/api/demo":
+        elif path == "/api/demo":
             self._send(200, {"image": _demo_image()})
-        elif self.path == "/health":
+        elif path == "/api/cubicasa":
+            # precomputed model from the pretrained CubiCasa5K detector (demo)
+            p = os.path.join(STATIC, "_cubicasa_model.json")
+            if os.path.exists(p):
+                with open(p, "rb") as f:
+                    self._send(200, f.read(), "application/json")
+            else:
+                self._send(404, {"error": "no precomputed model"})
+        elif path == "/health":
             self._send(200, {"ok": True})
         else:
             self._send(404, {"error": "not found"})
