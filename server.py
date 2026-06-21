@@ -16,6 +16,7 @@ model and nothing else here changes.
 import base64
 import json
 import os
+import sys
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -24,6 +25,15 @@ from geometry import build
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
+
+# learned detector (CubiCasa5K) -- optional; falls back to classical if its
+# deps/weights aren't present. See model/detector.py.
+sys.path.insert(0, os.path.join(HERE, "model"))
+try:
+    import detector as learned
+except Exception as e:                       # pragma: no cover
+    print(f"[server] learned detector import failed: {e}")
+    learned = None
 
 
 def _decode_data_url(data_url):
@@ -49,12 +59,24 @@ def model_from_image_bytes(raw):
     # to OpenCV's imread, which decodes them all.
     if raw[:5] == b"%PDF-":
         raw = _pdf_first_page_to_png(raw)
+
+    # Learned detector first (handles real architectural plans). If it isn't
+    # available or returns nothing usable, fall back to the classical detector
+    # (clean schematic plans only).
+    if learned is not None:
+        det = learned.detect_bytes(raw)
+        if det and len(det.get("walls", [])) >= 2:
+            model = build(det)
+            model["engine"] = "cubicasa"
+            return model
+
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         f.write(raw)
         path = f.name
     try:
-        det = detect(path)
-        return build(det)
+        model = build(detect(path))
+        model["engine"] = "classical"
+        return model
     finally:
         os.unlink(path)
 

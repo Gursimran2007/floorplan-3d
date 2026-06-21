@@ -50,7 +50,7 @@
     </div>
     <div class="muted" id="status">ready.</div>
     <div style="flex:1"></div>
-    <div class="muted">detection: classical CV (v1) · geometry + three.js</div>
+    <div class="muted" id="engine">detection: classical CV (v1) · geometry + three.js</div>
   </div>
   <div id="stage">
     <div id="hint">drag to orbit · scroll to zoom · right-drag to pan</div>
@@ -157,6 +157,10 @@ function showStats(model){
   $('s_win').textContent  = model.counts? model.counts.windows : '—';
   $('s_room').textContent = model.counts? model.counts.rooms : '—';
   $('s_box').textContent  = model.boxes.length;
+  const eng = model.engine==='cubicasa'
+    ? 'detection: CubiCasa5K (learned) · geometry + three.js'
+    : 'detection: classical CV (v1) · geometry + three.js';
+  $('engine').textContent = eng;
   $('stats').style.display='block';
 }
 
