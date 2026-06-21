@@ -1,3 +1,13 @@
+---
+title: Floorplan 3D
+emoji: 🏠
+colorFrom: gray
+colorTo: orange
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # Floorplan → 3D
 
 Drop a clean 2D floor-plan image in the browser; it detects the **walls, doors
