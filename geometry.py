@@ -35,6 +35,60 @@ def _span(w):
     return w["x1"], min(w["y1"], w["y2"]), max(w["y1"], w["y2"])
 
 
+def _classify_room(r, rank, n):
+    """Heuristic room type from area rank + aspect (NOT recognition -- a guess,
+    clearly labelled as such in the UI). Largest -> living, then bedrooms, the
+    smallest squarish ones -> bath/kitchen. Good enough to make the 3D model feel
+    furnished; a learned classifier replaces this later."""
+    w, h = r["x1"] - r["x0"], r["y1"] - r["y0"]
+    aspect = max(w, h) / max(1, min(w, h))
+    if rank == 0:
+        return "living"
+    if r["area_px"] < 22000:
+        return "bath" if aspect < 1.6 else "kitchen"
+    if aspect > 2.0:
+        return "hall"
+    return "bedroom"
+
+
+# furniture templates per room type: list of (relx, rely, w, h, height, kind)
+# positions are fractions of the room interior; sizes are fractions too.
+FURNITURE = {
+    "living":  [(0.5, 0.78, 0.55, 0.18, 16, "sofa"),
+                (0.5, 0.45, 0.30, 0.16, 8, "table")],
+    "bedroom": [(0.5, 0.6, 0.55, 0.5, 14, "bed"),
+                (0.12, 0.15, 0.18, 0.12, 22, "wardrobe")],
+    "kitchen": [(0.5, 0.12, 0.7, 0.14, 20, "counter"),
+                (0.5, 0.7, 0.28, 0.18, 8, "table")],
+    "bath":    [(0.7, 0.7, 0.3, 0.22, 14, "tub"),
+                (0.2, 0.2, 0.14, 0.14, 16, "sink")],
+    "hall":    [],
+}
+
+
+def _furniture_boxes(rooms):
+    """Place heuristic furniture inside each detected room."""
+    out, labels = [], []
+    n = len(rooms)
+    for rank, r in enumerate(rooms):
+        rtype = _classify_room(r, rank, n)
+        x0, y0, x1, y1 = r["x0"], r["y0"], r["x1"], r["y1"]
+        rw, rh = x1 - x0, y1 - y0
+        inset = 0.08
+        ix0, iy0 = x0 + rw * inset, y0 + rh * inset
+        iw, ih = rw * (1 - 2 * inset), rh * (1 - 2 * inset)
+        # tinted rug = thin slab marking the room
+        out.append(_box(r["cx"], 0.5, r["cy"], rw * 0.92, 1, rh * 0.92, "rug"))
+        labels.append({"text": rtype, "p": [round(r["cx"], 1), 95,
+                                             round(r["cy"], 1)],
+                       "area_px": r["area_px"]})
+        for (fx, fy, fw, fh, fhh, kind) in FURNITURE.get(rtype, []):
+            cx = ix0 + iw * fx
+            cz = iy0 + ih * fy
+            out.append(_box(cx, fhh / 2 + 1, cz, iw * fw, fhh, ih * fh, "furniture"))
+    return out, labels
+
+
 def _box(cx, cy, cz, sx, sy, sz, kind):
     return {"kind": kind,
             "p": [round(cx, 1), round(cy, 1), round(cz, 1)],
@@ -112,10 +166,18 @@ def build(det):
             cur = g1
         emit_solid(cur, a1)
 
+    # rooms -> furniture + labels
+    from rooms import detect_rooms
+    found_rooms = detect_rooms(det)
+    furn, labels = _furniture_boxes(found_rooms)
+    boxes.extend(furn)
+
     return {"size": [W, H], "wall_height": WALL_H, "boxes": boxes,
+            "labels": labels,
             "counts": {"walls": len(det["walls"]),
                        "doors": len(det["doors"]),
-                       "windows": len(det["windows"])}}
+                       "windows": len(det["windows"]),
+                       "rooms": len(found_rooms)}}
 
 
 def main():

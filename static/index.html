@@ -45,6 +45,7 @@
       <div class="stat"><span>walls</span><b id="s_wall">0</b></div>
       <div class="stat"><span>doors</span><b id="s_door">0</b></div>
       <div class="stat"><span>windows</span><b id="s_win">0</b></div>
+      <div class="stat"><span>rooms</span><b id="s_room">0</b></div>
       <div class="stat"><span>3D boxes</span><b id="s_box">0</b></div>
     </div>
     <div class="muted" id="status">ready.</div>
@@ -93,7 +94,22 @@ const MAT = {
   sill:   new THREE.MeshStandardMaterial({color:0xc8c2b4, roughness:.85}),
   glass:  new THREE.MeshStandardMaterial({color:0x8ecbff, transparent:true,
             opacity:.32, roughness:.1, metalness:.1}),
+  rug:    new THREE.MeshStandardMaterial({color:0x3b4a63, roughness:1,
+            transparent:true, opacity:.55}),
+  furniture: new THREE.MeshStandardMaterial({color:0xc88a5a, roughness:.7}),
 };
+
+function makeLabel(text){
+  const c = document.createElement('canvas'); c.width=256; c.height=64;
+  const g = c.getContext('2d');
+  g.fillStyle='rgba(20,24,31,0.82)'; g.roundRect?.(0,0,256,64,12); g.fill();
+  g.font='bold 30px -apple-system,sans-serif'; g.fillStyle='#e6edf3';
+  g.textAlign='center'; g.textBaseline='middle'; g.fillText(text,128,34);
+  const tex = new THREE.CanvasTexture(c);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, depthTest:false}));
+  spr.scale.set(95,24,1);
+  return spr;
+}
 
 function renderModel(model){
   scene.remove(group); group = new THREE.Group(); scene.add(group);
@@ -110,6 +126,12 @@ function renderModel(model){
       edges.position.copy(mesh.position); group.add(edges);
     }
     group.add(mesh);
+  }
+  // floating room labels
+  for(const lb of (model.labels||[])){
+    const spr = makeLabel(lb.text);
+    spr.position.set(lb.p[0]-W/2, lb.p[1], lb.p[2]-H/2);
+    group.add(spr);
   }
   const diag = Math.hypot(W,H);
   camera.position.set(W*0.15, diag*0.7, H*0.9);
@@ -133,6 +155,7 @@ function showStats(model){
   $('s_wall').textContent = model.counts? model.counts.walls : '—';
   $('s_door').textContent = model.counts? model.counts.doors : '—';
   $('s_win').textContent  = model.counts? model.counts.windows : '—';
+  $('s_room').textContent = model.counts? model.counts.rooms : '—';
   $('s_box').textContent  = model.boxes.length;
   $('stats').style.display='block';
 }
