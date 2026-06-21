@@ -160,7 +160,14 @@ function showStats(model){
   $('stats').style.display='block';
 }
 
+function needsServer(){
+  if(location.protocol === 'http:' || location.protocol === 'https:') return false;
+  setStatus("open this through the server — run  python server.py  and visit http://localhost:8000 (opening the .html file directly can't reach the detector).",'#f85149');
+  return true;
+}
+
 async function sendImage(dataURL){
+  if(needsServer()) return;
   setStatus('detecting walls, doors, windows…','var(--accent)');
   $('plan').src = dataURL; $('plan').style.display='block';
   try{
@@ -184,6 +191,7 @@ drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files[0]; if(!f)return
   const rd=new FileReader(); rd.onload=()=>sendImage(rd.result); rd.readAsDataURL(f); });
 
 $('demoBtn').onclick = async ()=>{
+  if(needsServer()) return;
   setStatus('loading sample…','var(--accent)');
   const r = await fetch('/api/demo'); const dataURL = (await r.json()).image;
   sendImage(dataURL);
