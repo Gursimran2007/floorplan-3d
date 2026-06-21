@@ -37,8 +37,8 @@
     <h1>Floorplan → 3D</h1>
     <div class="sub">Drop a clean 2D floor-plan image. It detects walls, doors and
       windows, then builds a 3D model you can orbit and walk through.</div>
-    <div id="drop">⬆ drop a floor-plan PNG<br>or click to choose</div>
-    <input id="file" type="file" accept="image/*" hidden>
+    <div id="drop">⬆ drop a floor plan<br><span class="muted">PNG · JPG · PDF</span><br>or click to choose</div>
+    <input id="file" type="file" accept="image/png,image/jpeg,image/*,application/pdf,.pdf" hidden>
     <button class="ghost" id="demoBtn">use the sample plan</button>
     <img id="plan" alt="input plan">
     <div id="stats" style="display:none">
@@ -144,11 +144,11 @@ async function sendImage(dataURL){
     const r = await fetch('/api/model', {method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({image: dataURL})});
-    if(!r.ok) throw new Error('server '+r.status);
-    const model = await r.json();
-    renderModel(model); showStats(model);
-    setStatus(`done — ${model.boxes.length} boxes built.`,'var(--ok)');
-  }catch(e){ setStatus('error: '+e.message,'#f85149'); }
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.error || ('server '+r.status));
+    renderModel(data); showStats(data);
+    setStatus(`done — ${data.boxes.length} boxes built.`,'var(--ok)');
+  }catch(e){ setStatus(e.message,'#f85149'); $('stats').style.display='none'; }
 }
 
 const drop = $('drop'), file = $('file');

@@ -19,7 +19,7 @@ import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from detect import detect
+from detect import detect, DetectionError
 from geometry import build
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,7 +33,22 @@ def _decode_data_url(data_url):
     return base64.b64decode(data_url)
 
 
+def _pdf_first_page_to_png(raw):
+    """Rasterize page 1 of a PDF to PNG bytes at ~2x so thin CAD lines survive."""
+    import fitz   # PyMuPDF
+    doc = fitz.open(stream=raw, filetype="pdf")
+    if doc.page_count == 0:
+        raise DetectionError("the PDF has no pages.")
+    page = doc.load_page(0)
+    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+    return pix.tobytes("png")
+
+
 def model_from_image_bytes(raw):
+    # PDF? (magic bytes) -> rasterize the first page. PNG/JPG/etc. go straight
+    # to OpenCV's imread, which decodes them all.
+    if raw[:5] == b"%PDF-":
+        raw = _pdf_first_page_to_png(raw)
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         f.write(raw)
         path = f.name
@@ -90,7 +105,11 @@ class Handler(BaseHTTPRequestHandler):
             raw = _decode_data_url(payload["image"])
             model = model_from_image_bytes(raw)
             self._send(200, model)
+        except DetectionError as e:
+            self._send(422, {"error": str(e)})
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self._send(400, {"error": str(e)})
 
 

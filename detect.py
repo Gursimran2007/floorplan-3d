@@ -30,13 +30,46 @@ import numpy as np
 
 GAP_MIN = 28          # px; smaller breaks are intersections/noise, not openings
 LINE_TOL = 9          # px; centerlines within this are "the same wall line"
+MAX_SIDE = 1400       # downscale huge real-world plans to this longest side
+
+
+class DetectionError(Exception):
+    """Raised when an image doesn't look like a recoverable floor plan.
+    Carries a human-readable reason for the UI (vs an opaque 500)."""
 
 
 def load_binary(path):
+    """Binarize ANY plan to walls=white(255) on black, robustly:
+
+      - Otsu threshold (auto, not a fixed 127) handles faint/low-contrast lines.
+      - polarity auto-detect: walls are the MINORITY ink, so whichever class
+        (dark-on-light or light-on-dark) is the smaller area is taken as walls.
+        This makes dark-background CAD exports work without a flag.
+      - huge images are downscaled so morphology kernel sizes stay meaningful.
+    """
     g = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
     if g is None:
-        raise FileNotFoundError(path)
-    _, b = cv2.threshold(g, 127, 255, cv2.THRESH_BINARY_INV)
+        raise DetectionError("could not read the image (unsupported or corrupt file).")
+
+    h, w = g.shape
+    scale = MAX_SIDE / max(h, w)
+    if scale < 1.0:
+        g = cv2.resize(g, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+    g = cv2.GaussianBlur(g, (3, 3), 0)
+    _, otsu = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # otsu -> foreground(255)=bright. Walls are the minority pixels; pick that side.
+    bright = int((otsu == 255).sum())
+    dark = int((otsu == 0).sum())
+    walls_are_bright = bright < dark
+    b = otsu if walls_are_bright else cv2.bitwise_not(otsu)
+
+    ink = b.mean() / 255.0
+    if ink < 0.002:
+        raise DetectionError("almost no wall lines found — is this a clean floor plan?")
+    if ink > 0.45:
+        raise DetectionError("the image is too dense to read as a floor plan "
+                             "(photo, filled rooms, or heavy shading?).")
     return b
 
 
@@ -138,6 +171,12 @@ def detect(path):
     h_walls, h_open = _merge_and_find_gaps(h_segs, "h", Hmask)
     v_walls, v_open = _merge_and_find_gaps(v_segs, "v", Vmask)
     walls = h_walls + v_walls
+
+    if len(walls) < 2:
+        raise DetectionError(
+            "couldn't find clear straight walls. This v1 works on clean, "
+            "axis-aligned floor plans (black/solid walls on a light background). "
+            "Hand-drawn or photographed plans aren't supported yet.")
 
     # bounding box of all walls = outer boundary, to classify door vs window
     xs = [w["x1"] for w in walls] + [w["x2"] for w in walls]
