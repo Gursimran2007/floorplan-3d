@@ -25,6 +25,7 @@ import numpy as np
 
 # ignore wall slivers / icon specks smaller than this many px on their long axis
 MIN_LEN = 18
+COLLIN_TOL = 8     # segments within this many px of the same centerline are collinear
 
 
 def _thickness(wall):
@@ -55,16 +56,60 @@ def _components(mask, axis):
     return out
 
 
+def _mk(axis, c, a, b):
+    if axis == "h":
+        return {"x1": a, "y1": c, "x2": b, "y2": c}
+    return {"x1": c, "y1": a, "x2": c, "y2": b}
+
+
+def _merge(segs, axis, join):
+    """Connected-components splits one real wall into many pieces wherever a
+    perpendicular wall crosses it. Stitch them back: group segments that share a
+    centerline (within COLLIN_TOL), then on each line union spans whose ends are
+    within `join` px. Openings aren't bridged here -- doors/windows come from the
+    icon masks and geometry.py cuts them back into these merged walls."""
+    if not segs:
+        return []
+    cen = (lambda s: s["y1"]) if axis == "h" else (lambda s: s["x1"])
+    lo = (lambda s: s["x1"]) if axis == "h" else (lambda s: s["y1"])
+    hi = (lambda s: s["x2"]) if axis == "h" else (lambda s: s["y2"])
+
+    segs = sorted(segs, key=lambda s: (cen(s), lo(s)))
+    lines = []
+    for s in segs:
+        if lines and abs(cen(s) - lines[-1]["c"]) <= COLLIN_TOL:
+            lines[-1]["items"].append(s)
+        else:
+            lines.append({"c": cen(s), "items": [s]})
+
+    out = []
+    for ln in lines:
+        items = sorted(ln["items"], key=lo)
+        c = int(np.median([cen(s) for s in items]))
+        a, b = lo(items[0]), hi(items[0])
+        for s in items[1:]:
+            if lo(s) <= b + join:
+                b = max(b, hi(s))
+            else:
+                out.append(_mk(axis, c, a, b))
+                a, b = lo(s), hi(s)
+        out.append(_mk(axis, c, a, b))
+    return out
+
+
 def _wall_segments(wall, t):
     """Filled wall regions -> axis-aligned centerline segments. A long thin
     horizontal kernel keeps only horizontal runs, a vertical one keeps verticals,
-    so crossing walls separate into individual segments at their junctions."""
+    so crossing walls separate into individual segments at their junctions, then
+    we merge collinear pieces back into maximal walls."""
     L = max(3, t * 3)
+    join = max(COLLIN_TOL, t * 2)
     hmask = cv2.morphologyEx(
         wall, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (L, 1)))
     vmask = cv2.morphologyEx(
         wall, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, L)))
-    return _components(hmask, "h") + _components(vmask, "v")
+    return (_merge(_components(hmask, "h"), "h", join)
+            + _merge(_components(vmask, "v"), "v", join))
 
 
 def _opening_segments(mask):
