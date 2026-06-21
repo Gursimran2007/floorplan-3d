@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+data/
+*.detected.json
+*.overlay.png
+*.model.json
+demo.png
+demo.json

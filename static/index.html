@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Floorplan → 3D — drop a 2D plan, walk the model</title>
+<style>
+  :root{ --bg:#0e1116; --panel:#161b22; --fg:#e6edf3; --dim:#8b949e;
+         --accent:#f0883e; --blue:#58a6ff; --ok:#3fb950; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+            background:var(--bg);color:var(--fg);overflow:hidden}
+  #app{display:flex;height:100%}
+  #side{width:300px;background:var(--panel);border-right:1px solid #30363d;
+        padding:18px;display:flex;flex-direction:column;gap:14px;z-index:2}
+  h1{font-size:17px;margin:0}
+  .sub{font-size:12px;color:var(--dim);line-height:1.5}
+  #drop{border:1.5px dashed #444c56;border-radius:10px;padding:22px 14px;text-align:center;
+        cursor:pointer;font-size:13px;color:var(--dim);transition:.15s}
+  #drop:hover,#drop.hot{border-color:var(--accent);color:var(--fg);background:#1d242d}
+  button{background:var(--accent);color:#111;border:0;border-radius:7px;padding:9px;
+         font-weight:600;cursor:pointer;font-size:13px}
+  button.ghost{background:#21262d;color:var(--fg);border:1px solid #30363d;font-weight:500}
+  .stat{display:flex;justify-content:space-between;font-size:13px;
+        padding:6px 0;border-bottom:1px solid #21262d}
+  .stat b{color:var(--blue)}
+  #plan{width:100%;border-radius:8px;border:1px solid #30363d;display:none}
+  #stage{flex:1;position:relative}
+  #hint{position:absolute;left:14px;bottom:12px;font-size:11px;color:var(--dim);
+        background:#0e1116aa;padding:6px 10px;border-radius:6px}
+  .muted{font-size:11px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="side">
+    <h1>Floorplan → 3D</h1>
+    <div class="sub">Drop a clean 2D floor-plan image. It detects walls, doors and
+      windows, then builds a 3D model you can orbit and walk through.</div>
+    <div id="drop">⬆ drop a floor-plan PNG<br>or click to choose</div>
+    <input id="file" type="file" accept="image/*" hidden>
+    <button class="ghost" id="demoBtn">use the sample plan</button>
+    <img id="plan" alt="input plan">
+    <div id="stats" style="display:none">
+      <div class="stat"><span>walls</span><b id="s_wall">0</b></div>
+      <div class="stat"><span>doors</span><b id="s_door">0</b></div>
+      <div class="stat"><span>windows</span><b id="s_win">0</b></div>
+      <div class="stat"><span>3D boxes</span><b id="s_box">0</b></div>
+    </div>
+    <div class="muted" id="status">ready.</div>
+    <div style="flex:1"></div>
+    <div class="muted">detection: classical CV (v1) · geometry + three.js</div>
+  </div>
+  <div id="stage">
+    <div id="hint">drag to orbit · scroll to zoom · right-drag to pan</div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e1116);
+const camera = new THREE.PerspectiveCamera(55, stage.clientWidth/stage.clientHeight, 1, 8000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+dir.position.set(300, 600, 200); scene.add(dir);
+const dir2 = new THREE.DirectionalLight(0x88aaff, 0.35);
+dir2.position.set(-300, 200, -300); scene.add(dir2);
+
+let group = new THREE.Group(); scene.add(group);
+
+const MAT = {
+  floor:  new THREE.MeshStandardMaterial({color:0x6b6457, roughness:.95}),
+  wall:   new THREE.MeshStandardMaterial({color:0xd9d4c8, roughness:.85}),
+  lintel: new THREE.MeshStandardMaterial({color:0xc8c2b4, roughness:.85}),
+  sill:   new THREE.MeshStandardMaterial({color:0xc8c2b4, roughness:.85}),
+  glass:  new THREE.MeshStandardMaterial({color:0x8ecbff, transparent:true,
+            opacity:.32, roughness:.1, metalness:.1}),
+};
+
+function renderModel(model){
+  scene.remove(group); group = new THREE.Group(); scene.add(group);
+  const [W,H] = model.size;
+  for(const b of model.boxes){
+    const [sx,sy,sz] = b.s;
+    const geo = new THREE.BoxGeometry(Math.max(sx,.1), Math.max(sy,.1), Math.max(sz,.1));
+    const mesh = new THREE.Mesh(geo, MAT[b.kind] || MAT.wall);
+    // center the plan at origin; image-x -> x, image-y -> z, y is up
+    mesh.position.set(b.p[0]-W/2, b.p[1], b.p[2]-H/2);
+    if(b.kind!=='floor' && b.kind!=='glass'){
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({color:0x000000, transparent:true, opacity:.18}));
+      edges.position.copy(mesh.position); group.add(edges);
+    }
+    group.add(mesh);
+  }
+  const diag = Math.hypot(W,H);
+  camera.position.set(W*0.15, diag*0.7, H*0.9);
+  controls.target.set(0, 0, 0); controls.update();
+}
+
+function resize(){
+  renderer.setSize(stage.clientWidth, stage.clientHeight);
+  camera.aspect = stage.clientWidth/stage.clientHeight; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene,camera); })();
+
+// ---- pipeline wiring ----
+const $ = id => document.getElementById(id);
+const setStatus = (t,c)=>{ const s=$('status'); s.textContent=t; s.style.color=c||'var(--dim)'; };
+
+function showStats(model){
+  const k = {wall:0,lintel:0,sill:0,glass:0};
+  model.boxes.forEach(b=>k[b.kind]=(k[b.kind]||0)+1);
+  $('s_wall').textContent = model.counts? model.counts.walls : '—';
+  $('s_door').textContent = model.counts? model.counts.doors : '—';
+  $('s_win').textContent  = model.counts? model.counts.windows : '—';
+  $('s_box').textContent  = model.boxes.length;
+  $('stats').style.display='block';
+}
+
+async function sendImage(dataURL){
+  setStatus('detecting walls, doors, windows…','var(--accent)');
+  $('plan').src = dataURL; $('plan').style.display='block';
+  try{
+    const r = await fetch('/api/model', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({image: dataURL})});
+    if(!r.ok) throw new Error('server '+r.status);
+    const model = await r.json();
+    renderModel(model); showStats(model);
+    setStatus(`done — ${model.boxes.length} boxes built.`,'var(--ok)');
+  }catch(e){ setStatus('error: '+e.message,'#f85149'); }
+}
+
+const drop = $('drop'), file = $('file');
+drop.onclick = ()=>file.click();
+file.onchange = e=>{ const f=e.target.files[0]; if(!f)return;
+  const rd=new FileReader(); rd.onload=()=>sendImage(rd.result); rd.readAsDataURL(f); };
+['dragover','dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{
+  e.preventDefault(); drop.classList.toggle('hot', ev==='dragover'); }));
+drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files[0]; if(!f)return;
+  const rd=new FileReader(); rd.onload=()=>sendImage(rd.result); rd.readAsDataURL(f); });
+
+$('demoBtn').onclick = async ()=>{
+  setStatus('loading sample…','var(--accent)');
+  const r = await fetch('/api/demo'); const dataURL = (await r.json()).image;
+  sendImage(dataURL);
+};
+</script>
+</body>
+</html>
