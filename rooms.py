@@ -14,7 +14,7 @@ purpose of room separation).
 import numpy as np
 import cv2
 
-MIN_ROOM_AREA = 4000     # px^2; smaller blobs are gaps/closets-of-noise
+MIN_ROOM_AREA = 7000     # px^2; smaller blobs are gaps/closets-of-noise
 
 
 def detect_rooms(det):

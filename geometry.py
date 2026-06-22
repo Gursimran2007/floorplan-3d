@@ -35,19 +35,26 @@ def _span(w):
     return w["x1"], min(w["y1"], w["y2"]), max(w["y1"], w["y2"])
 
 
-def _classify_room(r, rank, n):
+def _classify_room(r, rank, used):
     """Heuristic room type from area rank + aspect (NOT recognition -- a guess,
     clearly labelled as such in the UI). Largest -> living, then bedrooms, the
-    smallest squarish ones -> bath/kitchen. Good enough to make the 3D model feel
-    furnished; a learned classifier replaces this later."""
+    smallest squarish ones -> bath/kitchen. A home has ONE kitchen and only a
+    couple of baths, so those labels are capped via `used` -- otherwise every
+    small squarish blob comes back "kitchen" and you get the 3-kitchen look.
+    Good enough to make the 3D model feel furnished; a learned classifier
+    replaces this later."""
     w, h = r["x1"] - r["x0"], r["y1"] - r["y0"]
     aspect = max(w, h) / max(1, min(w, h))
     if rank == 0:
         return "living"
-    if r["area_px"] < 22000:
-        return "bath" if aspect < 1.6 else "kitchen"
     if aspect > 2.0:
         return "hall"
+    if r["area_px"] < 22000 and aspect < 1.6:
+        if used.get("kitchen", 0) == 0:
+            return "kitchen"
+        if used.get("bath", 0) < 2:
+            return "bath"
+        return "storage"
     return "bedroom"
 
 
@@ -69,9 +76,10 @@ FURNITURE = {
 def _furniture_boxes(rooms):
     """Place heuristic furniture inside each detected room."""
     out, labels = [], []
-    n = len(rooms)
+    used = {}
     for rank, r in enumerate(rooms):
-        rtype = _classify_room(r, rank, n)
+        rtype = _classify_room(r, rank, used)
+        used[rtype] = used.get(rtype, 0) + 1
         x0, y0, x1, y1 = r["x0"], r["y0"], r["x1"], r["y1"]
         rw, rh = x1 - x0, y1 - y0
         inset = 0.08

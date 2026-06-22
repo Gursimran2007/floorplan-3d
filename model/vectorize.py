@@ -97,19 +97,45 @@ def _merge(segs, axis, join):
     return out
 
 
+def _seg_len(s):
+    return max(abs(s["x2"] - s["x1"]), abs(s["y2"] - s["y1"]))
+
+
+def _snap(segs, axis, q):
+    """Quantise centerline + endpoints to a q-px grid so collinear pieces line up
+    (and the merge below can actually join them) and walls share clean corners."""
+    if q < 2:
+        return segs
+    r = lambda v: int(round(v / q) * q)
+    out = []
+    for s in segs:
+        if axis == "h":
+            out.append({"x1": r(s["x1"]), "y1": r(s["y1"]),
+                        "x2": r(s["x2"]), "y2": r(s["y1"])})
+        else:
+            out.append({"x1": r(s["x1"]), "y1": r(s["y1"]),
+                        "x2": r(s["x1"]), "y2": r(s["y2"])})
+    return out
+
+
 def _wall_segments(wall, t):
     """Filled wall regions -> axis-aligned centerline segments. A long thin
     horizontal kernel keeps only horizontal runs, a vertical one keeps verticals,
     so crossing walls separate into individual segments at their junctions, then
-    we merge collinear pieces back into maximal walls."""
+    we snap to a grid, merge collinear pieces into maximal walls, and drop the
+    short slivers (stair treads, furniture edges, hatching the model mistook for
+    wall) that would otherwise litter the model."""
     L = max(3, t * 3)
     join = max(COLLIN_TOL, t * 2)
+    q = max(2, t // 2)
+    min_wall = max(MIN_LEN, t * 4)   # a real wall spans at least a few thicknesses
     hmask = cv2.morphologyEx(
         wall, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (L, 1)))
     vmask = cv2.morphologyEx(
         wall, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, L)))
-    return (_merge(_components(hmask, "h"), "h", join)
-            + _merge(_components(vmask, "v"), "v", join))
+    walls = (_merge(_snap(_components(hmask, "h"), "h", q), "h", join)
+             + _merge(_snap(_components(vmask, "v"), "v", q), "v", join))
+    return [s for s in walls if _seg_len(s) >= min_wall]
 
 
 def _opening_segments(mask):
